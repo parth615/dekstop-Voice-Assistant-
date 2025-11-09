@@ -1,0 +1,7 @@
+requests~=2.32.5
+PyQt6
+requests
+openai
+wikipedia
+pyttsx3
+SpeechRecognition
