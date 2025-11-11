@@ -19,6 +19,7 @@ except ImportError:
     psutil = None
 
 MEMORY_FILE = os.path.expanduser("~/.assistant_memory.json")
+NOTES_FILE = os.path.expanduser("~/.assistant_notes.txt")
 
 def load_memory():
     """Loads the memory dictionary from the JSON file."""
@@ -45,17 +46,14 @@ def remember_fact(query):
     """Parses a query to extract a key-value fact and saves it."""
     memory = load_memory()
 
-    # Common phrasing patterns: "my X is Y", "I like Z", "I am W"
 
-    # Simple parsing logic (e.g., "remember my favorite color is blue")
     if "is" in query:
         parts = query.split(" is ", 1)
 
-        # Check if the part before 'is' looks like the key (e.g., 'my favorite color')
+
         key_part = parts[0].replace("remember", "").replace("that", "").replace("my", "").strip()
         value_part = parts[1].strip()
 
-        # Use simple, clean key
         key = key_part.replace("your", "").replace("a", "").replace("an", "").strip()
         key = key.lower().replace(" ", "_")
 
@@ -87,6 +85,114 @@ def recall_fact(query):
         say(f"I don't specifically remember anything about your {key.replace('_', ' ')}. Would you like me to remember it?")
     else:
         say("What personal fact would you like me to recall?")
+
+
+def forget_fact(query):
+    """Parses a query to find a key and deletes the fact from memory."""
+    memory = load_memory()
+
+    key_phrases = query.replace("forget that", "").replace("forget about", "").replace(
+        "delete the fact that", "").replace("clear my", "").strip()
+    key = key_phrases.split("?")[-1].split("your")[-1].split("my")[-1].strip()
+    key = key.lower().replace(" ", "_")
+
+    if key in memory:
+        value = memory.pop(key)
+        save_memory(memory)
+        say(f"I have successfully forgotten that your {key.replace('_', ' ')} was {value}.")
+    elif key:
+        say(f"I don't seem to have a fact stored for {key.replace('_', ' ')}.")
+    else:
+        say("Please specify the fact you want me to forget.")
+
+def delete_file(query):
+    """Safely deletes a file specified in the query (must be explicit)."""
+    parts = query.split("delete file")[-1].split("remove file")[-1].strip()
+
+    filename = parts.split("called")[-1].strip().strip('."\'')
+
+    if not filename:
+        say("I need the exact name of the file to delete. Please be careful with this command.")
+        return
+
+    file_path = os.path.expanduser(filename)
+
+    if not os.path.exists(file_path):
+        say(f"Error: The file '{filename}' was not found at the expected location.")
+        return
+    if not file_path.startswith(os.path.expanduser("~")):
+        say("For security reasons, I can only delete files within your home directory.")
+        return
+
+    try:
+        os.remove(file_path)
+        say(f"Successfully deleted the file: {filename}")
+        print(f"Deleted file: {file_path}")
+    except PermissionError:
+        say(f"Error: I do not have permission to delete the file: {filename}")
+    except Exception as e:
+        say(f"An unexpected error occurred while trying to delete the file: {filename}")
+        print(f"File Deletion Error: {e}")
+
+def create_note(query):
+    """Creates a timestamped note/journal entry in a dedicated file."""
+    note_content = query.replace("create note", "").replace("make a note", "").replace("write down", "").replace("journal that", "").strip()
+
+    if not note_content:
+        say("What would you like the note to say?")
+        return
+
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    formatted_note = f"\n--- {timestamp} ---\n{note_content}\n"
+
+    try:
+        with open(NOTES_FILE, "a") as f:
+            f.write(formatted_note)
+        say(f"Noted! I've saved a new entry: {note_content[:30]}...")
+    except Exception:
+        say("Sorry, I couldn't save your note.")
+
+
+def set_system_volume(query):
+    """Attempts to set the system volume to a specified percentage (macOS/Linux)."""
+    parts = query.split()
+    target_volume = None
+
+    for i, part in enumerate(parts):
+        try:
+            val = int(part.strip('%'))
+            if 0 <= val <= 100:
+                target_volume = val
+                break
+        except ValueError:
+            continue
+
+    if target_volume is None:
+        say("Please specify a volume level, like fifty percent, or set volume to eighty.")
+        return
+
+    try:
+        if platform.system() == "Darwin": # macOS
+            # Volume is 0-1.0 on macOS for 'osascript'
+            subprocess.run(["osascript", "-e", f"set volume output volume {target_volume}"], check=True)
+            say(f"Setting system volume to {target_volume} percent.")
+        elif platform.system() == "Linux": # Linux (requires 'amixer' or similar)
+            # This is a common method but may require a specific package (e.g., alsa-utils)
+            subprocess.run(["amixer", "set", "Master", f"{target_volume}%"], check=True)
+            say(f"Setting system volume to {target_volume} percent.")
+        elif platform.system() == "Windows":
+            # Windows requires specific libraries or PowerShell commands which are more complex.
+            say("Direct volume control is complex on Windows and is not yet supported.")
+        else:
+            say("Volume control is not supported on this operating system.")
+
+    except subprocess.CalledProcessError:
+        say("I couldn't change the system volume. Make sure the necessary system tools are installed.")
+    except Exception as e:
+        say("An error occurred while trying to control the volume.")
+        print("Volume Control Error:", e)
+
+
 def run_diagnostics():
     """Checks and reports system usage metrics (CPU, Memory, Battery)."""
     if psutil is None:
