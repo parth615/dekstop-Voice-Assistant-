@@ -78,6 +78,29 @@ class AssistantWorker(QObject):
             elif any(phrase in query for phrase in
                      ["run diagnostics", "check system", "check memory", "check battery", "system status"]):
                 commands.run_diagnostics()
+
+            elif any(phrase in query for phrase in ["forget that", "forget about", "delete my fact"]):
+                commands.forget_fact(query)
+
+            elif any(phrase in query for phrase in
+                     ["remember that", "save this fact", "my name is", "i am called", "i live in"]):
+                commands.remember_fact(query)
+
+            elif any(phrase in query for phrase in
+                     ["what is my", "what is your favorite", "where is my", "tell me about my"]):
+                commands.recall_fact(query)
+
+            elif any(phrase in query for phrase in ["set volume to", "change volume to", "volume up", "volume down"]):
+                commands.set_system_volume(query)
+
+            elif any(phrase in query for phrase in ["delete file", "remove file", "trash file"]):
+                commands.delete_file(query)
+
+            elif any(phrase in query for phrase in ["create note", "make a note", "write down", "journal that"]):
+                commands.create_note(query)
+
+            elif "convert" in query or "conversion" in query:
+                commands.convert_units(query)
             elif any(phrase in query for phrase in
                      ["remember that", "save this fact", "my name is", "i am called", "i live in"]):
                 commands.remember_fact(query)
