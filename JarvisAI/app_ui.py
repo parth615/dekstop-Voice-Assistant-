@@ -4,8 +4,8 @@ import config
 import commands
 import voice
 import os
-import shlex
 import time
+import pyttsx3
 from queue import Empty
 
 from PyQt6.QtWidgets import (
@@ -13,9 +13,33 @@ from PyQt6.QtWidgets import (
     QPushButton, QTextEdit, QLabel, QStatusBar,
     QHBoxLayout
 )
-from PyQt6.QtCore import QThread, pyqtSignal, QObject, Qt, QByteArray, QTimer, QBuffer, QIODevice
+from PyQt6.QtCore import QThread, pyqtSignal, QObject, Qt, QByteArray, QBuffer, QIODevice
 from PyQt6.QtGui import QMovie, QFont
 import requests
+
+
+class TTSWorker(QThread):
+    def run(self):
+        local_engine = pyttsx3.init()
+        local_engine.setProperty('rate', config.VOICE_RATE)
+
+        try:
+            local_engine.setProperty('voice', config.VOICE_ID)
+        except:
+            pass
+
+        while True:
+            try:
+                text = voice.speech_queue.get()
+
+                if text is None:
+                    break
+
+                local_engine.say(text)
+                local_engine.runAndWait()
+
+            except Exception as e:
+                print(f"TTS Error: {e}")
 
 
 class ListenerWorker(QObject):
@@ -28,7 +52,6 @@ class ListenerWorker(QObject):
         self.finished.emit()
 
 
-# --- 2. ASSISTANT WORKER ---
 class AssistantWorker(QObject):
     finished = pyqtSignal()
 
@@ -56,7 +79,6 @@ class AssistantWorker(QObject):
                     site = content
                     if "go to" in query:
                         site = query.split("go to")[-1].strip()
-
                     site = site.replace("website", "").replace("site", "").replace("go to", "").strip()
 
                     if site.lower().strip() in ("any kind of site", ""):
@@ -98,16 +120,6 @@ class AssistantWorker(QObject):
 
             elif any(phrase in query for phrase in ["create note", "make a note", "write down", "journal that"]):
                 commands.create_note(query)
-
-            elif "convert" in query or "conversion" in query:
-                commands.convert_units(query)
-            elif any(phrase in query for phrase in
-                     ["remember that", "save this fact", "my name is", "i am called", "i live in"]):
-                commands.remember_fact(query)
-
-            elif any(phrase in query for phrase in
-                     ["what is my", "what is your favorite", "where is my", "tell me about my"]):
-                commands.recall_fact(query)
 
             elif "convert" in query or "conversion" in query:
                 commands.convert_units(query)
@@ -156,8 +168,7 @@ class AssistantWorker(QObject):
                 commands.tell_a_joke()
             elif any(word in query for word in
                      ["plus", "minus", "times", "divide", "+", "-", "*", "/", "^", "square", "root", "sin", "cos",
-                      "tan",
-                      "calculate"]):
+                      "tan", "calculate"]):
                 expr = query.replace("what is", "").replace("calculate", "").replace("?", "").strip()
                 commands.perform_calculation(expr)
 
@@ -187,13 +198,11 @@ class AssistantWorker(QObject):
             self.finished.emit()
 
 
-# --- 3. ASSISTANT WINDOW (UI) ---
 class AssistantWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Jarvis Voice Assistant UI")
         self.setGeometry(100, 100, 800, 600)
-
         self.setStyleSheet("QMainWindow { background-color: #121212; }")
 
         self.listener_thread = None
@@ -203,16 +212,12 @@ class AssistantWindow(QMainWindow):
 
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        try:
-            self.log_text.setFont(QFont("Arial", 10))
-        except:
-            self.log_text.setFont(QFont("Arial", 10))
-
+        self.log_text.setFont(QFont("Arial", 10))
         self.log_text.setStyleSheet(
             "border: 1px solid #333333; padding: 15px; background-color: #1E1E1E; color: #CCCCCC; border-radius: 8px;"
         )
         self.log_text.setText(
-            "<b><font color='#A0A0A0'>Welcome to Jarvis! Click Listen to Command to activate the assistant.</font></b>")
+            "<b><font color='#A0A0A0'>Welcome to Jarvis! Click Listen to Command to activate.</font></b>")
 
         self.gif_label = QLabel()
         self.gif_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -220,7 +225,6 @@ class AssistantWindow(QMainWindow):
 
         movie = QMovie()
         self.gif_label.setMovie(movie)
-
         self.load_gif_from_url(
             "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExc3ZjcTBmZGR1cWptYWQ4YWw4OGgxamR3dXliZXlna21rbnQxMGR5NiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/XsNAXQl1E8ig8MHAhf/giphy.gif",
             self.gif_label.movie()
@@ -254,30 +258,16 @@ class AssistantWindow(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.set_status("Ready. Click Listen to Command.")
 
-        self.speech_timer = QTimer(self)
-        self.speech_timer.timeout.connect(self.process_speech_queue)
-        self.speech_timer.start(150)
 
-    def process_speech_queue(self):
-        """Checks the global speech queue and executes commands in the main thread."""
-        try:
-            text = voice.speech_queue.get_nowait()
-            if text:
-                voice.engine.say(text)
-                voice.engine.runAndWait()
-        except Empty:
-            pass
-        except Exception as e:
-            print(f"Speech processing error in QTimer: {e}")
+        self.tts_worker = TTSWorker()
+        self.tts_worker.start()
 
     def set_status(self, text, color='#A0A0A0'):
-        """Updates the status bar message (Sets status bar color explicitly)."""
         self.status_bar.setStyleSheet(
             f"QStatusBar {{ background-color: #1E1E1E; color: {color}; border-top: 1px solid #333333; }}")
         self.status_bar.showMessage(text)
 
     def cleanup_listener(self):
-        """Aggressively cleans up listener objects."""
         if self.listener_thread:
             self.listener_thread.quit()
             self.listener_thread.wait(500)
@@ -288,7 +278,6 @@ class AssistantWindow(QMainWindow):
             self.listener_worker = None
 
     def cleanup_processor(self):
-        """Aggressively cleans up processor objects."""
         if self.processor_thread:
             self.processor_thread.quit()
             self.processor_thread.wait(500)
@@ -299,7 +288,6 @@ class AssistantWindow(QMainWindow):
             self.processor_worker = None
 
     def start_listening(self):
-        """Initializes and starts the ListenerWorker thread."""
         self.listen_button.setEnabled(False)
         self.set_status("Listening for your command...", '#FFD700')
 
@@ -310,7 +298,6 @@ class AssistantWindow(QMainWindow):
         self.listener_worker.moveToThread(self.listener_thread)
 
         self.listener_thread.started.connect(self.listener_worker.run)
-
         self.listener_worker.finished.connect(self.cleanup_listener)
         self.listener_worker.query_signal.connect(self.process_command)
         self.listener_worker.finished.connect(lambda: self.listen_button.setEnabled(True))
@@ -318,7 +305,6 @@ class AssistantWindow(QMainWindow):
         self.listener_thread.start()
 
     def process_command(self, query):
-        """Receives query from Listener and starts AssistantWorker."""
         self.set_status("Speech Recognized. Processing Command...", '#007ACC')
 
         if query:
@@ -329,7 +315,6 @@ class AssistantWindow(QMainWindow):
             self.processor_worker.moveToThread(self.processor_thread)
 
             self.processor_thread.started.connect(self.processor_worker.run)
-
             self.processor_worker.finished.connect(self.cleanup_processor)
             self.processor_worker.finished.connect(lambda: self.listen_button.setEnabled(True))
             self.processor_worker.finished.connect(lambda: self.set_status("Ready", '#A0A0A0'))
@@ -340,7 +325,6 @@ class AssistantWindow(QMainWindow):
             self.set_status("Ready (No command detected)", '#A0A0A0')
 
     def append_log(self, text, color):
-        """Appends formatted text to the main log area (The UI callback)."""
         if color == "darkorange":
             display_color = "#FFD700"
         elif color == "black":
@@ -355,36 +339,24 @@ class AssistantWindow(QMainWindow):
         self.log_text.append(f"<p style='color:{display_color}; margin: 0;'>{text}</p>")
 
     def load_gif_from_url(self, url, movie_player):
-        """Fetches a GIF from a URL and loads it into a QMovie object (PyQt6 compatible)."""
         try:
             response = requests.get(url, stream=True, timeout=10)
-
             if response.status_code == 200:
                 self.gif_byte_array = QByteArray(response.content)
                 self.gif_buffer = QBuffer(self.gif_byte_array)
                 self.gif_buffer.open(QIODevice.OpenModeFlag.ReadOnly)
-
                 movie_player.setDevice(self.gif_buffer)
                 movie_player.setCacheMode(QMovie.CacheMode.CacheAll)
                 movie_player.start()
-            else:
-                self.log_text.append(
-                    f"<b><font color='#FF8A80'>Error loading GIF: HTTP Status {response.status_code}</font></b>")
-
-        except requests.exceptions.Timeout:
-            self.log_text.append("<b><font color='#FF8A80'>Error loading GIF: Request timed out.</font></b>")
-        except Exception as e:
-            self.log_text.append(f"<b><font color='#FF8A80'>Error loading GIF: {type(e).__name__}: {e}</font></b>")
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-
     window = AssistantWindow()
     window.show()
-
     voice.set_ui_log_callback(window.append_log)
     app.aboutToQuit.connect(voice.engine.stop)
     window.app = app
-
     sys.exit(app.exec())

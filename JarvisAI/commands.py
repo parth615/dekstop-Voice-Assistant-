@@ -18,8 +18,8 @@ try:
 except ImportError:
     psutil = None
 
-MEMORY_FILE = os.path.expanduser("~/.assistant_memory.json")
-NOTES_FILE = os.path.expanduser("~/.assistant_notes.txt")
+MEMORY_FILE = config.MEMORY_FILE
+NOTES_FILE = config.NOTES_FILE
 
 def load_memory():
     """Loads the memory dictionary from the JSON file."""
@@ -203,13 +203,11 @@ def run_diagnostics():
         # CPU Usage
         cpu_percent = psutil.cpu_percent(interval=1)
 
-        # Memory Usage
         memory = psutil.virtual_memory()
         mem_percent = memory.percent
         total_mem_gb = memory.total / (1024 ** 3)
         available_mem_gb = memory.available / (1024 ** 3)
 
-        # Battery Status
         battery_info = psutil.sensors_battery()
         battery_status = ""
         if battery_info:
@@ -228,7 +226,6 @@ def run_diagnostics():
 def convert_units(query):
     """Handles simple unit conversions (e.g., temperature, distance)."""
     try:
-        # Simplified parsing: find numbers and common conversion phrases
         parts = query.lower().split()
         value = None
         for part in parts:
